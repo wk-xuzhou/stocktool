@@ -1,15 +1,15 @@
 # ARCHITECTURE
 
 **项目**：stocktool
-**版本**：v1.0 / 2026-10-23
+**版本**：v1.1 / 2026-10-24
 
 ## 1. 架构图（文字）
 
 Windows PC(通达信) --TXT--> macOS data/raw/
 |
-data/sync.py (解析+AkShare)
+data/sync.py (解析+AkShare+快照清单)
 |
-PostgreSQL(按年分区)
+PostgreSQL(按年分区，历史状态/板块成分按日保存)
 |
 engine/universe->sector->signal->backtest
 |
@@ -19,7 +19,7 @@ FastAPI(:8000) -- Streamlit(:8501)
 
 | 层 | 目录 | 职责 |
 | --- | --- | --- |
-| 数据层 | `data/` | `tdx_parser.py` `ak_sync.py` `sync.py` `validate.py` |
+| 数据层 | `data/` | `tdx_parser.py` `ak_sync.py` `sync.py` `validate.py`；复权快照、数据清单、市场状态与历史板块成分 |
 | 引擎层 | `engine/` | `universe.py` `sector.py` `signal.py` `score.py` `backtest.py` |
 | API 层 | `api/` | `main.py`（`/health` `/signals` `/backtest/{id}`） |
 | 展示层 | `dashboard/` | `app.py` |
@@ -42,8 +42,11 @@ FastAPI(:8000) -- Streamlit(:8501)
 
 ## 4. 关键设计决策
 
-- **复权**：通达信导出后复权，入库时用因子换算为前复权口径，全库统一 `qfq`；每周全量覆盖避免基准漂移。
-- **分区**：`daily_price`/`stock_extra` 按 `trade_date` RANGE 年分区，主键含分区键。
+- **复权**：通达信导出后复权，使用可验证因子换算为前复权口径；全库统一 qfq，并以快照版本防止基准更新改写历史结果。
+- **复权版本**：每次全量复权生成不可变 `price_snapshot_id`，信号和回测保存输入版本；不静默覆盖已引用快照。
+- **历史时点**：ST、停牌、退市状态和板块成分按交易日保存，回测禁止使用当前状态回看历史。
+- **分区**：`daily_price`/`stock_status_daily`/`stock_extra` 按 `trade_date` RANGE 年分区，主键含分区键。
 - **板块唯一源**：AkShare 东财板块日线，不依赖通达信板块导出。
 - **回测主口径**：T+1 开盘价；实盘另记实际成交价与理论开盘价对照。
 - **失败降级**：AkShare 失败跳过当日补字段，信号引擎用已有数据继续并标注数据完整性。
+- **完整性边界**：缺少关键历史输入时可以生成 `partial` 试算，但不得进入正式回测和验收指标。

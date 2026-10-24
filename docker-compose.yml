@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: stocktool-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-stocktool}
+      POSTGRES_USER: ${POSTGRES_USER:-stocktool}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    ports:
+      - "${POSTGRES_PORT:-15433}:5432"
+    volumes:
+      - stocktool_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
+volumes:
+  stocktool_pgdata:
