@@ -57,4 +57,4 @@
 - `tests/test_sync.py`：显式 full_actual、数据库名/价格口径保护、逐文件释放 DataFrame、源文件解析期间及预检后变化拒绝、无新增时空文件质量状态。
 - `tests/test_versioning.py`：生成器逐项消费、不累计历史 DataFrame，空生成器拒绝。
 - `tests/test_sync_db.py`：显式设置 `STOCKTOOL_RUN_DB_TESTS=1` 才连接本地 PostgreSQL；合成样例覆盖全量基线→同快照幂等→增量→无新增、actual/qfq/hfq 隔离、旧快照保留，以及第二文件变化后回滚已写行情和版本。测试数据全部回滚（序列取号不回滚）。
-- 真实历史全量数据导入、覆盖率与批量资源验收尚未执行，D08 保持进行中。
+- 2026-10-27 实际 actual 历史导入验收已完成，计数、资源、真实目录无新增增量及真实尾部新增记录见 `docs/D08_ACTUAL_IMPORT_ACCEPTANCE.md`。全输入质量和目标回测区间覆盖仍归 D12/D13，不作为 D08 未完成项。
