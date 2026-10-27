@@ -1,15 +1,17 @@
 # DATA_DICTIONARY
 
 **项目**：stocktool
-**版本**：v1.1 / 2026-10-24
+**版本**：v1.2 / 2026-10-25
 
 ## 1. 单位与数据口径
 
-- 成交量统一为股（通达信手数 ×100）；成交额为元；价格使用 `NUMERIC(12,3)`，市值/成交额使用元。
+- 成交量统一为股；2026-10-25 抽查的通达信 TXT 已为股，不乘 100，其他来源仅在明确为手时乘 100。成交额为元；价格使用 `NUMERIC(12,3)`，市值/成交额使用元。
 - 日期使用 `DATE`，采集和更新时间使用 `TIMESTAMPTZ`；代码统一为 6 位字符串。
-- `daily_price` 只存前复权（qfq）价格；复权因子、原始价格和复权快照 ID 必须保留，以便审计和复现。
+- `daily_price` 同时容纳独立导入的 `actual`、可追溯的 `qfq` 和可选 `hfq` 源价格；qfq 不是由文件名或价格比值推断。复权因子仅在来源可验证时保存，原始价格和价格快照 ID 必须保留，以便审计和复现。
 - 任何回测和信号均绑定不可变的 `price_snapshot_id`。全量复权生成新快照，不覆盖已有快照；旧快照只有在无信号或回测引用且显式清理时才可删除。
 - 历史回测必须使用历史时点的 ST 状态、证券状态、行业/概念板块成分、市值和停牌信息。若某日期所需快照缺失，该日期标记数据不完整并从正式指标中排除，不能以前值或当前值静默填充。
+
+本批通达信文件格式、单位依据及复权换算限制见 `DATA_SOURCE_CHECK.md`。不复权源按 actual、后复权源按 hfq 分别保存；未取得可信换算依据前不得生成正式 qfq 快照。
 
 ## 2. 表结构
 
@@ -32,16 +34,18 @@
 | code | VARCHAR(10) | 证券代码 |
 | trade_date | DATE | 分区键 |
 | price_snapshot_id | BIGINT | 复权快照 ID |
-| open/high/low/close | NUMERIC(12,3) | qfq 价格 |
-| hfq_open/hfq_high/hfq_low/hfq_close | NUMERIC(12,3) | 通达信后复权源价格；若源为其他口径须在清单中声明 |
-| actual_open/actual_high/actual_low/actual_close | NUMERIC(12,3) | 未复权实际成交价格，用于涨跌停校验和成交模拟 |
-| adjustment_factor | NUMERIC(20,10) | 源行情到 actual、actual 到 qfq 的换算因子及来源版本 |
-| source_price_basis | VARCHAR(16) | hfq/actual/other |
+| qfq_open/qfq_high/qfq_low/qfq_close | NUMERIC(12,3) | qfq 计算价格；直接 qfq 未配对或来源不完整时可为空 |
+| hfq_open/hfq_high/hfq_low/hfq_close | NUMERIC(12,3) | 可选的通达信后复权源价格；不得作为 qfq 的默认替代 |
+| actual_open/actual_high/actual_low/actual_close | NUMERIC(12,3) | 未复权实际成交价格，用于涨跌停校验、成交模拟和收益计算 |
+| adjustment_factor | NUMERIC(20,10) | 仅在来源可验证时记录源行情到 actual 或 actual 到 qfq 的因子；未知时为空 |
+| source_price_basis | VARCHAR(16) | actual/qfq/hfq/other；记录本行源口径 |
 | volume | BIGINT | 股 |
 | amount | NUMERIC(18,2) | 元 |
 | source | VARCHAR(16) | tdx/akshare |
 | updated_at | TIMESTAMPTZ | 入库时间 |
 | **PK** | (code, trade_date, price_snapshot_id) | 含分区键 |
+
+导入器按 `source_price_basis` 只填充同口径 OHLC 列，其余口径列留空；不写入推测的 `adjustment_factor`。同一 `price_snapshot_id` 下遇到相同主键使用 `ON CONFLICT DO NOTHING`，历史修订应建立新快照。
 
 ### price_snapshots（不可变价格版本清单）
 
@@ -49,12 +53,15 @@
 | --- | --- | --- |
 | id | BIGSERIAL PK | 快照 ID |
 | created_at | TIMESTAMPTZ | 生成时间 |
-| adjustment_basis_date | DATE | qfq 基准日 |
-| source_manifest | JSONB | 输入文件/数据源及校验和 |
-| status | VARCHAR(16) | building/complete/invalid |
-| notes | TEXT | 生成说明、校验结果摘要 |
+| adjustment_basis_date | DATE | 转换路径的 qfq 基准日；直接导入 qfq 且来源未声明时为空，不得推断 |
+| source_manifest | JSONB | 输入文件/数据源及校验和；记录文件路径、SHA-256、代码/日期范围、行数和来源元数据；直接 qfq 至少记录原始基准声明（未声明为 unknown）、导出时间、来源版本及 actual 配对范围和缺口 |
+| input_actual_manifest_id | BIGINT FK | actual 输入清单；无该口径输入时为空 |
+| input_qfq_manifest_id | BIGINT FK | qfq 输入清单；无该口径输入时为空 |
+| input_hfq_manifest_id | BIGINT FK | hfq 输入清单；无该口径输入时为空 |
+| status | VARCHAR(16) | building/complete/partial/invalid |
+| notes | TEXT | 生成说明、逐列/逐日配对校验结果和限制 |
 
-后复权转前复权不得假定仅凭后复权 OHLCV 就能恢复。必须从通达信导出中取得可验证的换算因子，或补充可信的公司行为/复权因子数据；因子来源不可验证时拒绝生成正式价格快照。技术指标使用 qfq，涨跌停校验及模拟成交使用 actual 价格。AkShare 对比必须明确采用相同复权类型和同一基准日。
+后复权转前复权不得假定仅凭后复权 OHLCV 就能恢复。优先直接导入带可追溯元数据的 qfq；若走转换路径，必须取得可验证的换算因子或公司行为/算法资料，并逐列校验。因子来源不可验证时拒绝生成正式 qfq 快照，但不阻塞 actual 价格入库。技术指标使用 qfq，涨跌停校验、模拟成交及收益使用 actual。AkShare 对比必须明确采用相同复权类型和同一基准日；当前尚未确认通达信直接 qfq 的具体基准规则。
 
 ### stock_status_daily（历史证券状态，按年分区）
 
@@ -64,6 +71,7 @@
 | trade_date | DATE | 分区键 |
 | is_st | BOOLEAN | T 日 ST 状态 |
 | is_suspended | BOOLEAN | T 日停牌状态 |
+| is_delisted | BOOLEAN NULL | T 日是否已退市；NULL 表示来源未提供/未知，不得按 false 回填 |
 | name | VARCHAR(32) | T 日证券简称，可选 |
 | source | VARCHAR(16) | 数据来源 |
 | **PK** | (code, trade_date) | 含分区键 |
@@ -128,7 +136,7 @@
 
 ### data_manifests
 
-每次同步或计算输入生成一条清单，记录日期范围、源文件校验和、数据源、导入时间、覆盖/新增行数及校验状态。回测结果通过该清单和 `price_snapshot_id` 复现输入。
+每次导入追加一条清单，记录来源、来源版本、价格口径、逐文件路径及 SHA-256、代码数、起止日期、行数和状态（building/complete/partial/invalid）。一个清单可聚合多个同来源、同版本、同口径文件，`source_manifest` 保存逐文件元数据。价格快照通过 actual/qfq/hfq 清单外键追溯输入；被快照引用的清单由数据库触发器禁止更新或删除，修订必须新增清单。回测结果通过该清单和 `price_snapshot_id` 复现输入。
 
 ### backtest_runs
 
@@ -155,8 +163,8 @@ CREATE TABLE daily_price (
   code VARCHAR(10) NOT NULL,
   trade_date DATE NOT NULL,
   price_snapshot_id BIGINT NOT NULL,
-  open NUMERIC(12,3), high NUMERIC(12,3),
-  low NUMERIC(12,3), close NUMERIC(12,3),
+  qfq_open NUMERIC(12,3), qfq_high NUMERIC(12,3),
+  qfq_low NUMERIC(12,3), qfq_close NUMERIC(12,3),
   hfq_open NUMERIC(12,3), hfq_high NUMERIC(12,3),
   hfq_low NUMERIC(12,3), hfq_close NUMERIC(12,3),
   actual_open NUMERIC(12,3), actual_high NUMERIC(12,3),
@@ -172,7 +180,7 @@ CREATE TABLE stock_status_daily (
   code VARCHAR(10) NOT NULL,
   trade_date DATE NOT NULL,
   is_st BOOLEAN NOT NULL,
-  is_suspended BOOLEAN NOT NULL,
+  is_suspended BOOLEAN NOT NULL, is_delisted BOOLEAN,
   name VARCHAR(32), source VARCHAR(16),
   PRIMARY KEY (code, trade_date)
 ) PARTITION BY RANGE (trade_date);

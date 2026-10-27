@@ -1,0 +1,6 @@
+code,trade_date,is_st,is_suspended,is_delisted,name,source
+600001,2026-10-20,false,false,false,测试银行,synthetic
+600001,2026-10-21,true,false,false,ST测试银行,synthetic
+600001,2026-10-22,true,true,false,ST测试银行,synthetic
+000002,2026-10-20,false,false,false,测试地产,synthetic
+000002,2026-10-21,false,false,true,测试地产,synthetic

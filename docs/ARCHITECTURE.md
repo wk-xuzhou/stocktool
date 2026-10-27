@@ -19,7 +19,7 @@ FastAPI(:8000) -- Streamlit(:8501)
 
 | 层 | 目录 | 职责 |
 | --- | --- | --- |
-| 数据层 | `data/` | `tdx_parser.py` `ak_sync.py` `sync.py` `validate.py`；复权快照、数据清单、市场状态与历史板块成分 |
+| 数据层 | `data/` | `tdx_parser.py` `ak_sync.py` `sync.py` `validate.py`；actual/qfq 配对快照、数据清单、市场状态与历史板块成分 |
 | 引擎层 | `engine/` | `universe.py` `sector.py` `signal.py` `score.py` `backtest.py` |
 | API 层 | `api/` | `main.py`（`/health` `/signals` `/backtest/{id}`） |
 | 展示层 | `dashboard/` | `app.py` |
@@ -42,8 +42,8 @@ FastAPI(:8000) -- Streamlit(:8501)
 
 ## 4. 关键设计决策
 
-- **复权**：通达信导出后复权，使用可验证因子换算为前复权口径；全库统一 qfq，并以快照版本防止基准更新改写历史结果。
-- **复权版本**：每次全量复权生成不可变 `price_snapshot_id`，信号和回测保存输入版本；不静默覆盖已引用快照。
+- **价格口径**：actual 用于涨跌停和成交，qfq 用于技术计算；优先直接导入可追溯 qfq 并与 actual 按代码/交易日配对。后复权转 qfq 仅在可验证因子或公司行为/算法资料存在时启用。
+- **价格版本**：每次新建 actual/qfq 输入组合或转换结果生成不可变 `price_snapshot_id`，信号和回测保存输入版本；不静默覆盖已引用快照。
 - **历史时点**：ST、停牌、退市状态和板块成分按交易日保存，回测禁止使用当前状态回看历史。
 - **分区**：`daily_price`/`stock_status_daily`/`stock_extra` 按 `trade_date` RANGE 年分区，主键含分区键。
 - **板块唯一源**：AkShare 东财板块日线，不依赖通达信板块导出。

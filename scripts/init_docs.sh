@@ -18,13 +18,13 @@ cat > docs/README.md <<'STOCKTOOL_DOC_EOF'
 
 ## 技术栈
 
-Python 3.12 + venv + Git / PostgreSQL（按年分区）/ FastAPI / Streamlit / AkShare / 通达信 TXT 导入
+Python 3.14.6 + venv + Git / PostgreSQL（按年分区）/ FastAPI / Streamlit / AkShare / 通达信 TXT 导入
 
 ## 快速开始
 
 ```bash
 cd /path/to/stocktool
-python3.12 -m venv .venv && source .venv/bin/activate
+python3.14 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env                 # 填 PG 连接串
 docker compose up -d postgres        # 启动本地 PostgreSQL（宿主端口 15433）

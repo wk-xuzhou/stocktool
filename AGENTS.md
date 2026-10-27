@@ -2,7 +2,7 @@
 
 ## 项目结构
 
-`stocktool` 是一个基于 Python 3.12、文档驱动的 A 股波段选股工具骨架。请确保各模块职责与文档中规定的分层严格一致：
+`stocktool` 是一个基于 Python 3.14.6、文档驱动的 A 股波段选股工具骨架。请确保各模块职责与文档中规定的分层严格一致：
 
 - `data/`：通达信数据导入、AkShare 数据同步、数据校验以及原始/解析后数据目录。
 - `engine/`：股票池（universe）、板块（sector）、交易信号（signal）、评分（scoring）和回测（backtest）逻辑。
@@ -13,7 +13,9 @@
 
 ## 构建、测试与开发
 
-使用 `python3.12 -m venv .venv && source .venv/bin/activate` 创建文档推荐的虚拟环境，并通过 `pip install -r requirements.txt` 安装依赖。运行 `bash scripts/init_docs.sh` 可重新生成 `docs/README.md`。规划中的数据库及服务操作命令（`scripts/init_db.sh`、`scripts/start.sh`、`scripts/close.sh` 和 `scripts/daily_run.sh`）在 `docs/OPS_RUNBOOK.md` 中有详细描述，但目前尚未全部就绪；添加或更新相关脚本时请同步维护对应文档。
+使用 `python3.14 -m venv .venv && source .venv/bin/activate` 创建文档推荐的虚拟环境，并通过 `pip install -r requirements.txt` 安装依赖。运行 `bash scripts/init_docs.sh` 可重新生成 `docs/README.md`。规划中的数据库及服务操作命令（`scripts/init_db.sh`、`scripts/start.sh`、`scripts/close.sh` 和 `scripts/daily_run.sh`）在 `docs/OPS_RUNBOOK.md` 中有详细描述，但目前尚未全部就绪；添加或更新相关脚本时请同步维护对应文档。
+
+完全按照/Users/wukui/SourceCode/stocktool/docs/tasklist.md 文档定义的步骤开发。每次任务完成后回写更新tasklist.md 的任务状态。
 
 完成相关功能及测试实现后，可在仓库根目录下执行 `python -m pytest` 运行测试。如需进行轻量级的语法检查，可使用 `python -m compileall data engine api dashboard`。
 
@@ -24,6 +26,8 @@
 ## 测试规范
 
 测试文件命名遵循 `tests/test_<area>.py`，测试函数遵循 `test_<behavior>`。依照 `docs/TEST_PLAN.md`，测试应覆盖数据归一化、复权连续性、信号边界、仓位管理、交易成本处理以及防未来数据（前瞻偏差）保护等。测试必须使用确定性的固件（fixtures），除非明确标记为集成测试，否则严禁依赖实盘交易或外部网络服务。
+
+测试通过后提交github 同名仓库。
 
 ## 提交与合并请求规范
 

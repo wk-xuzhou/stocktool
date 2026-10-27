@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 
@@ -70,8 +71,25 @@ def test_ci_workflow_defines_python_test_pipeline():
     ci_content = ci_path.read_text()
     assert "branches: [ main ]" in ci_content or "branches:\n      - main" in ci_content or "- main" in ci_content
     assert "runs-on: ubuntu-latest" in ci_content
-    assert 'python-version: "3.12"' in ci_content
+    assert 'python-version: "3.14.6"' in ci_content
     assert "pip install -r requirements.txt" in ci_content
     assert "python -m compileall data engine api dashboard" in ci_content
     assert "python -m pytest" in ci_content
 
+
+def test_raw_exports_and_finder_metadata_are_ignored():
+    paths = (
+        "data/raw/export/SH#600831.txt",
+        "data/raw/export_no/SZ#002546.txt",
+        ".DS_Store",
+        "data/.DS_Store",
+    )
+    result = subprocess.run(
+        ["git", "check-ignore", "--no-index", *paths],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert set(result.stdout.splitlines()) == set(paths)

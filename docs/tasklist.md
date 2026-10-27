@@ -1,8 +1,8 @@
 # TASKLIST
 
 **项目**：stocktool
-**版本**：v1.0 / 2026-10-24
-**状态**：开发前任务拆解，尚未开始实现
+**版本**：v1.2 / 2026-10-25
+**状态**：数据底座开发阶段；P00、P01 已完成，P02 已完成全量配对但仍待来源元数据和执行换算依据，D01-D05 已完成
 
 ## 1. 使用规则
 
@@ -23,7 +23,7 @@
 | 4. 应用与运维 | API、仪表盘、日常脚本和日志 | 本地盘后流程端到端可运行 |
 | 5. 验收与跟踪 | 完成历史抽查、连续运行和跟踪准备 | 验收记录及跟踪表 |
 
-说明：历史 ST/退市/板块成分快照和可验证复权因子的可获得性是主要外部依赖。若上游无法提供，不得以当前状态或推测因子替代；相关任务标记阻塞并调整正式回测范围。
+说明：历史 ST/退市/板块成分快照和可验证 qfq 来源是独立外部依赖。若上游无法提供，不得以当前状态或推测因子替代；只阻塞依赖该输入的信号/回测任务，不阻塞 TXT 解析、原始保存和 actual 行情导入。
 
 ## 3. 任务清单
 
@@ -31,30 +31,30 @@
 
 | ID | 任务 | 依赖 | 完成标准 | 状态 | 验证/产物 |
 | --- | --- | --- | --- | --- | --- |
-| P00 | 检查 Python、PostgreSQL、依赖和仓库启动环境 | 无 | 记录可用版本、安装/启动步骤与缺失项 | [ ] | 待填写 |
-| P01 | 核对通达信 TXT 样例、字段、编码、成交量和价格口径 | P00 | 至少有脱敏固定样例；解析规则和源价格口径明确 | [ ] | 待填写 |
-| P02 | 验证 qfq/actual 换算因子来源 | P01 | 找到可追溯因子来源，并能用样例对照；否则明确阻塞正式快照 | [ ] | 待填写 |
-| P03 | 验证历史状态与历史板块成分来源和覆盖年限 | P00 | 记录 ST、停牌、退市、板块成分及市场状态的可得字段、历史覆盖和缺口 | [ ] | 待填写 |
-| P04 | 固化测试夹具和数据版本样例 | P01-P03 | 构造小型确定性行情集，覆盖复权、停牌、涨跌停、板块变更、退市和缺失输入 | [ ] | 待填写 |
+| P00 | 检查 Python、PostgreSQL、依赖和仓库启动环境 | 无 | 记录可用版本、安装/启动步骤与缺失项 | [x] | 2026-10-25：吴总确认以 Python 3.14.6 为基准，CI/文档已同步。`requirements.txt` 全部依赖安装成功，9 个顶层依赖均可导入，`pip check` 通过；pytest 8.4.2，10 项测试通过。Docker Compose 5.3.1、PostgreSQL 客户端 18.4 已检查；数据库服务状态尚未验证。准备步骤见 `AGENTS.md`，已有 GitHub CI 工作流继续使用。 |
+| P01 | 核对通达信 TXT 样例、字段、编码、成交量和价格口径 | P00 | 至少有脱敏固定样例；解析规则和源价格口径明确 | [x] | 2026-10-25 复核：实际目录为 `export_no`/`export_f`/`export_b`，各 5,578 个 TXT，文件头分别为不复权/前复权/后复权，均可 GB18030 解码；三组文件名集合一致，但各有 3 个空数据文件。记录见 `DATA_SOURCE_CHECK.md`；固定样例仍仅用于离线格式测试。 |
+| P02 | 验证 qfq 来源、与 actual 配对及执行换算依据 | P01 | 取得可追溯直接 qfq，或取得可审计转换资料；完成逐代码/逐交易日、逐列校验，并记录导出元数据 | [~] | 2026-10-25 最终版流式扫描耗时 8 分 39 秒：5,578 对文件、17,009,531 行按代码/日期配对；代码/日期/重复/行数/量额异常均为 0，OHLC 差异行及逐字段计数详见 `DATA_SOURCE_CHECK.md`。配对结构通过，但 3 个双方空文件令覆盖状态为 partial。导出时间/工具版本/基准日缺失，且无可审计 qfq→actual 执行换算依据，不生成 actual 执行区间。 |
+| P03 | 验证历史状态与历史板块成分来源和覆盖年限 | P00 | 记录 ST、停牌、退市、板块成分及市场状态的可得字段、历史覆盖和缺口 | [x] | 2026-10-27：新增 `docs/HISTORICAL_STATE_SOURCE_CHECK.md`。核验 AkShare 风险警示板、两市停复牌、两网及退市、行业板块成分和板块历史行情接口；当前没有可审计的逐交易日历史 ST/停牌/退市/板块成分覆盖证据，正式信号/回测保持阻塞。 |
+| P04 | 分层固化测试夹具和数据版本样例 | P01；历史状态场景依赖 P03；qfq 配对场景依赖 P02（可并行） | 先固化 actual/TXT、单位和版本夹具；资料到位后补齐 qfq 配对、停牌、涨跌停、板块变更、退市和缺失输入 | [~] | 2026-10-27：新增 `tests/fixtures/history/` 及 `tests/test_historical_fixtures.py`，覆盖 ST、停牌、退市和板块成分随交易日变化；夹具为 synthetic，不代表真实来源。qfq 资料元数据、涨跌停和缺失输入夹具仍待补齐。 |
 
-阶段出口：P02、P03 的可用性已验证；不可用项已有明确阻塞记录和不扩大范围的处理决定。
+阶段出口：P02、P03 的可用性和缺口均有记录；不可用项不得阻塞无关的 actual/TXT 基础任务，正式 qfq 信号/回测仍须等待对应输入。
 
 ### 阶段 1：数据底座
 
 | ID | 任务 | 依赖 | 完成标准 | 状态 | 验证/产物 |
 | --- | --- | --- | --- | --- | --- |
-| D01 | 先写 TXT 解析器测试 | P04 | 覆盖代码补零、编码、列映射、手转股、金额单位、坏行和重复行 | [ ] | pytest 用例 |
-| D02 | 实现通达信 TXT 解析与规范化 | D01 | 输出接口字段和 source price basis；错误行有可定位报告 | [ ] | `data/tdx_parser.py` |
-| D03 | 先写数据库结构与分区验收测试 | P04 | 覆盖主键、年度分区、默认分区及价格快照隔离 | [ ] | pytest/DDL 检查 |
-| D04 | 建立表结构、迁移/初始化及年度分区 | D03 | 符合数据字典，重复执行安全，存在默认分区且主键满足 PostgreSQL 分区约束 | [ ] | schema、初始化脚本 |
-| D05 | 建立 price snapshot 和 data manifest 流程 | D04 | 每次导入记录来源、校验和、范围、计数、状态；已引用版本不被覆盖 | [ ] | 数据库记录及测试 |
-| D06 | 先写复权与价格口径转换测试 | P02、P04 | 覆盖 hfq 到 actual/qfq、基准日、缺因子失败、涨跌停使用 actual | [ ] | pytest 用例 |
-| D07 | 实现价格转换和不可变 qfq 快照 | D05、D06 | 因子可信才生成 complete 快照；保留源价、actual、qfq 和因子来源 | [ ] | `data/tdx_parser.py`/同步接口 |
-| D08 | 导入历史行情和增量行情 | D02、D04、D05、D07 | 幂等导入；可按股票、日期、快照查询；写入导入清单 | [ ] | `data/sync.py` |
+| D01 | 先写 TXT 解析器测试 | P01 | 覆盖代码补零、编码、列映射、股原值/明确为手时转股、金额单位、坏行和重复行；不依赖 qfq 或历史状态 | [x] | 2026-10-25：新增 `tests/test_tdx_parser.py`，5 项确定性测试先行通过；覆盖 actual/qfq 列映射、GB18030、代码补零、量单位、坏行、重复日和空导出。 |
+| D02 | 实现通达信 TXT 解析与规范化 | D01 | 输出接口字段和 source price basis；错误行有可定位报告 | [x] | 2026-10-25：实现 `data/tdx_parser.py`；支持 GB18030、actual/qfq/hfq 文件头、代码补零、显式手→股转换、空文件/坏行/重复日错误报告；抽查三组 raw 样例可解析。 |
+| D03 | 先写数据库结构与分区验收测试 | P01 | 覆盖主键、年度分区、默认分区及 actual/qfq/hfq 价格源的快照隔离 | [x] | 2026-10-25：新增 `tests/test_database_schema.py`，4 项确定性 DDL 验收测试通过。 |
+| D04 | 建立表结构、迁移/初始化及年度分区 | D03 | 符合数据字典，重复执行安全，存在默认分区且主键满足 PostgreSQL 分区约束 | [x] | 2026-10-25：更新 `scripts/init_db.sh`，补齐价格口径、快照/清单、历史状态、板块和市场表，以及 2019—2026 年度分区和默认分区；DDL 测试通过。 |
+| D05 | 建立 price snapshot 和 data manifest 流程 | D04 | 每次导入记录来源、校验和、范围、计数、状态；已引用版本不被覆盖 | [x] | 2026-10-25：新增 `data/versioning.py` 和 `tests/test_versioning.py`；清单记录来源版本、actual/qfq/hfq 口径、逐文件 SHA-256、代码/日期范围、行数和状态，并支持同口径多文件汇总；快照保留各输入清单 ID；内存注册器与 PostgreSQL 触发器均拒绝覆盖已引用清单。Docker PostgreSQL 实际初始化两次成功，触发器事务保护测试通过。 |
+| D06 | 先写复权与价格口径转换测试 | P02；P04 的 qfq 配对夹具 | 覆盖 direct qfq 与 actual 的逐日配对、hfq 转换可选路径、基准声明、缺因子失败和涨跌停使用 actual | [ ] | pytest 用例 |
+| D07 | 实现价格转换和不可变 qfq 快照 | D05、D06 | direct qfq 来源/配对可信，或转换路径因子可信，才生成 complete 快照；保留源价、actual、qfq 和来源元数据 | [ ] | `data/tdx_parser.py`/同步接口 |
+| D08 | 导入历史行情和增量行情 | D02、D04、D05 | actual 可先独立幂等导入；qfq/hfq 作为有来源声明的可选价格列写入清单 | [~] | 2026-10-27：新增显式 `run("full_actual")` 创建 actual 历史基线；两遍逐文件预检/写入并检查源文件 SHA-256，避免驻留全部历史 DataFrame；`incremental` 延续 stocktool/已有 actual 基线保护。确定性测试及本地 PostgreSQL 合成样例已验证全量→幂等→增量→无新增、快照隔离与异常回滚。未对 `data/raw/` 执行真实历史全量入库，批量资源和实际覆盖验收仍待完成，保持进行中。 |
 | D09 | 接入历史证券状态及每日扩展数据 | P03、D04 | 保存 T 日 ST、停牌、名称、总/流通市值、换手率；缺失不以前值静默补齐 | [ ] | `stock_status_daily`、`stock_extra` |
 | D10 | 接入板块日线与历史板块成分 | P03、D04 | 可按交易日查询板块成分及指数；记录来源和覆盖缺口 | [ ] | `sector_daily`、`sector_membership_daily` |
 | D11 | 接入市场状态所需数据 | P03、D04 | 可按日取得上证指数、MA20 输入和全市场涨停数；范围定义一致 | [ ] | `market_daily` |
-| D12 | 先写数据校验测试并实现校验报告 | D07-D11 | 覆盖缺失/重复、单位、口径、复权连续性、双源差异和版本完整性；关键缺失返回 partial/invalid | [ ] | `data/validate.py`、测试 |
+| D12 | 先写数据校验测试并实现校验报告 | D08-D11；qfq 校验项另依赖 D07 | 覆盖缺失/重复、单位、口径、qfq/actual 配对、复权连续性、双源差异和版本完整性；关键缺失返回 partial/invalid | [ ] | `data/validate.py`、测试 |
 | D13 | 验证历史数据覆盖与分区完整性 | D08-D12 | 目标回测区间输入缺口可量化；不满足规格的日期不会进入正式回测 | [ ] | 数据覆盖报告 |
 
 阶段出口：指定样例可复现导入、查询及完整性判断；关键历史来源缺失则停止正式回测任务。
@@ -67,7 +67,7 @@
 | S02 | 实现历史时点股票池 | S01 | 仅查 T 日快照；输出过滤原因和关键指标 | [ ] | `engine/universe.py` |
 | S03 | 先写主线板块测试 | D10、D11、P04 | 覆盖 5 日排名、涨停数、MA20、并列排序和历史成分 | [ ] | pytest 用例 |
 | S04 | 实现主线识别和市场状态计算 | S03 | 输出主线列表、排名、计数、状态档位及输入完整性 | [ ] | `engine/sector.py` |
-| S05 | 先写涨停与放量异动测试 | D07、D10、P04 | 覆盖板块规则差异、涨停价、特殊状态、10 日窗口和多个异动锚点 | [ ] | pytest 用例 |
+| S05 | 先写涨停与放量异动测试 | D08、D10、P04 | 覆盖 actual 涨停价、板块规则差异、特殊状态、10 日窗口和多个异动锚点；不依赖 hfq 转换 | [ ] | pytest 用例 |
 | S06 | 实现涨停判定和异动标记 | S05 | 用 actual 价校验涨停；最近合格异动为锚点；差异可审计 | [ ] | `engine/signal.py` |
 | S07 | 先写六条件触发和价格转换测试 | S02、S04、S06 | 覆盖各边界、形态、MA 条件、价格口径及缺失输入 | [ ] | pytest 用例 |
 | S08 | 实现回调确认、买入区间和固定止损 | S07 | 严格执行策略规格并同时输出 qfq 计算价与 actual 执行价 | [ ] | `engine/signal.py` |
@@ -120,7 +120,27 @@
 
 | 日期 | 任务 ID | 状态变更 | 验证命令/结果 | 备注或阻塞原因 |
 | --- | --- | --- | --- | --- |
-|  |  |  |  |  |
+| 2026-10-24 | P00 | [ ] → [x] | `.venv/bin/python -m pytest -q`：5 passed；检查 Python/Docker/PostgreSQL/依赖及 CI 文件 | 记录运行环境和缺失项；Docker daemon 访问受沙箱权限限制，未确认数据库运行状态。 |
+| 2026-10-24 | P01 | [ ] → [!] | `rg --files --hidden` 检查仓库数据文件：未发现通达信 TXT | 缺少真实脱敏样例，无法可靠确认格式；解除条件为提供样例文件。 |
+| 2026-10-25 | P00 | [x] 更新 | Python 3.14.6；安装 requirements 成功；9 个顶层依赖导入成功；`pip check` 通过；compileall 通过 | 吴总确认取消 Python 3.12 基准，CI 改为 3.14.6；远端 CI 需 push/PR 后执行，本次未触发。 |
+| 2026-10-25 | P01 | 复核并更正 | 重新扫描 `data/raw` 三组目录：各 5,578 个文件，文件头为不复权/前复权/后复权，三组各 3 个空数据文件 | 更正此前把目录写成 `export/`、且漏掉 `export_f`/`export_b` 的错误记录；以 `DATA_SOURCE_CHECK.md` 为准。 |
+| 2026-10-25 | P02 | [!] → [~] | 重新扫描实际 raw：发现 `export_f` 前复权目录；三组各 5,578 个文件，代表样本代码/日期/量额可配对 | P02 改为 direct qfq 全量配对校验；hfq 转换不再是前置条件。 |
+| 2026-10-25 | P02 | 阶段性复核 | `data.qfq_pair.scan_direct_qfq` 全量扫描：5,578 对文件、17,009,531 行配对；日期序列、行数、重复/坏行、成交量和成交额差异均为 0；OHLC 差异按字段记录 | 全量配对已完成；来源导出元数据缺失，且没有可信 qfq→actual 执行价格换算依据，P02 保持进行中。 |
+| 2026-10-25 | P02 | 最终版全量复核 | 最终版流式扫描耗时 8 分 39 秒：5,578 对文件/17,009,531 行；missing/code/date/duplicate/row count/volume/amount mismatch 均 0；OHLC 不同 14,596,538 行，字段 open/high/low/close 分别 14,596,493/14,596,495/14,596,492/14,596,491 | 配对结构通过；双方空文件 3 个，所以覆盖状态 partial。P02 继续等待来源元数据和可信执行换算依据。 |
+| 2026-10-25 | P04 | 阶段性补充 | `.venv/bin/python -m pytest tests/test_tdx_samples.py tests/test_qfq_pair.py -q`：10 passed | 新增 direct qfq 固定夹具和配对扫描测试；历史状态及策略场景夹具仍未完成。 |
+| 2026-10-25 | P04 | 阶段性修正 | `.venv/bin/python -m pytest tests/test_tdx_samples.py tests/test_qfq_pair.py -q`：12 passed | 修正样例代码为 `600001`，与 `SH#600001.txt` 命名一致；补证券代码错配、重复日期和状态语义测试。 |
+| 2026-10-25 | D08 | [ ] → [~] | `.venv/bin/python -m pytest tests/test_sync.py -q`：6 passed | 先完成单文件到已有快照的幂等写入；尚未实现导入任务创建 manifest/snapshot 的编排或目录增量流程，任务保持进行中。 |
+| 2026-10-25 | P04 | [ ] → [~] | 现有 `tests/fixtures/tdx/` 和 4 项样例测试完成 actual/hfq 结构、编码、单位和非单一比例保护 | 分层夹具尚未完整；qfq 配对和历史状态场景分别等待 P02、P03，不将 hfq 缺失当作全部数据底座的前置条件。 |
+| 2026-10-25 | D01 | [ ] → [x] | `.venv/bin/python -m pytest tests/test_tdx_parser.py -q`：5 passed | 先写确定性测试，再实现解析器；不等待 qfq 换算或历史状态资料。 |
+| 2026-10-25 | D02 | [ ] → [x] | `.venv/bin/python -m pytest -q`：15 passed；三组 raw 代表文件实际解析通过 | 实现最小 TXT 解析链路；空数据文件返回可定位错误，不静默生成空行情。 |
+| 2026-10-25 | D03 | [ ] → [x] | `.venv/bin/python -m pytest tests/test_database_schema.py -q`：4 passed | 先写 DDL 验收测试，覆盖价格快照隔离、三类价格列、历史分区和默认分区。 |
+| 2026-10-25 | D04 | [ ] → [x] | `.venv/bin/python -m pytest tests/test_database_schema.py tests/test_infrastructure.py -q`：10 passed | 初始化脚本已按当前数据字典重建；当时尚未连接数据库，后续 Docker PostgreSQL 实际幂等验收见补充记录。 |
+| 2026-10-25 | D04 | 验收补充 | `bash scripts/init_db.sh`（Docker PostgreSQL）连续 2 次成功；容器内 PostgreSQL 16.14，`pg_isready` accepting connections；版本表、触发器、2019—2026 分区及默认分区查询通过 | 修正宿主机无 PostgreSQL 客户端时的初始化路径；实际数据库结构已完成幂等验收。 |
+| 2026-10-25 | D05 | [ ] → [x] | `.venv/bin/python -m pytest -q`：28 passed；`.venv/bin/python -m compileall data engine api dashboard` 通过；`bash -n scripts/init_db.sh` 通过；`git diff --check` 通过；Docker PostgreSQL 初始化连续 2 次成功；触发器保护事务测试通过 | 新增版本清单/价格快照确定性流程和 PostgreSQL 追加写入接口；记录 actual/qfq/hfq 输入版本及原始文件 SHA-256；空数据文件可显式记录为 invalid；实际 Docker 数据库验收已完成。 |
+| 2026-10-27 | D08 | 阶段性验收 | `.venv/bin/python -m pytest -q`：52 passed；`.venv/bin/python -m compileall -q data engine api dashboard` 通过；`git diff --check` 通过；`bash scripts/init_db.sh` 成功；Docker PostgreSQL 临时事务验证首次写入 manifest/snapshot/daily_price，重复写入 0 行并回滚 | 目录批次导入和版本追溯链路已具备；数据库差异扫描和真正增量导入仍待后续补齐，未导入 `data/raw/` 全量历史数据。 |
+| 2026-10-27 | D08 | 增量更新阶段性完成 | `.venv/bin/python -m pytest tests/test_sync.py -q`：20 passed；全套测试 57 passed；只读确认 `current_database() = stocktool`、`current_user = stocktool`，Docker Compose 宿主端口映射为 15433 | 增量仅能基于已有 actual 快照运行；本次未写入数据库，历史全量导入和真实数据端到端增量验收仍待完成。 |
+| 2026-10-27 | P03/P04 | 历史状态来源审计与夹具补充 | `.venv/bin/python -m pytest tests/test_historical_fixtures.py tests/test_database_schema.py -q`：9 passed；`docs/HISTORICAL_STATE_SOURCE_CHECK.md` | 明确当前接口只能提供当前 ST/板块成分或缺少可审计覆盖；新增 `is_delisted` 历史字段和 synthetic 状态/成分夹具；真实来源到位前不得进入正式信号/回测。 |
+| 2026-10-27 | D08 | 显式历史基线与有界内存导入 | `.venv/bin/python -m pytest -q`：70 passed、2 skipped（默认跳过数据库集成）；本地 `STOCKTOOL_RUN_DB_TESTS=1 .venv/bin/python -m pytest tests/test_sync_db.py -q`：2 passed；compileall、脚本语法及 diff 检查通过 | 先新增失败测试再实现 full_actual、生成器清单和两遍逐文件导入；源文件变动拒绝，空文件无新增仍保留质量告警。数据库验收仅用合成数据且全回滚；真实历史全量和覆盖仍待验收，不将 D08 标为完成。 |
 
 ## 5. 文档依据
 

@@ -6,6 +6,7 @@ logs/
 run/
 output/
 backup/
-data/raw/*.txt
+data/raw/
 data/parsed/
 .pytest_cache/
+.DS_Store
