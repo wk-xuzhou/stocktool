@@ -174,6 +174,7 @@ def test_persist_functions_append_manifest_and_snapshot_records(tmp_path):
         input_manifest_ids={"qfq": manifest_id},
         source_manifest={"inputs": {"qfq": {"manifest_id": manifest_id}}},
         status="partial",
+        parent_snapshot_id=12,
     )
     snapshot_id = persist_price_snapshot(conn, snapshot)
 
@@ -182,6 +183,7 @@ def test_persist_functions_append_manifest_and_snapshot_records(tmp_path):
     assert "INSERT INTO data_manifests" in conn.calls[0][0]
     assert "INSERT INTO price_snapshots" in conn.calls[1][0]
     assert conn.calls[1][1][2] == manifest_id
+    assert "parent_price_snapshot_id" in conn.calls[1][0]
 
 
 def test_manifest_consumes_generator_without_retaining_source_frames(tmp_path):

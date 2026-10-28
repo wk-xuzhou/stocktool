@@ -449,7 +449,7 @@ class IncrementalCursor:
             self.result = (self.conn.database_name,)
         elif "FROM price_snapshots" in query:
             self.result = (8,) if self.conn.snapshot_exists else None
-        elif "MAX(trade_date)" in query:
+        elif "MAX(trade_date)" in query or "daily_price_for_snapshot" in query:
             self.result = self.conn.latest_snapshot_rows
         elif "INSERT INTO daily_price" in query and "SELECT" in query:
             self.conn.copied_snapshot = params
@@ -479,7 +479,7 @@ class IncrementalConnection:
         return IncrementalCursor(self)
 
 
-def test_incremental_import_filters_rows_by_latest_date_and_copies_snapshot(
+def test_incremental_import_filters_rows_and_links_parent_without_copying_snapshot(
     tmp_path, monkeypatch
 ):
     path = write_tdx_file(
@@ -496,7 +496,12 @@ def test_incremental_import_filters_rows_by_latest_date_and_copies_snapshot(
     )
     captured = {}
     monkeypatch.setattr(sync, "persist_data_manifest", lambda *args: 101)
-    monkeypatch.setattr(sync, "persist_price_snapshot", lambda *args: 202)
+
+    def capture_snapshot(conn, snapshot):
+        captured["snapshot"] = snapshot
+        return 202
+
+    monkeypatch.setattr(sync, "persist_price_snapshot", capture_snapshot)
 
     def capture_import(conn, frame, *, price_snapshot_id, source):
         captured["frame"] = frame.copy()
@@ -511,11 +516,8 @@ def test_incremental_import_filters_rows_by_latest_date_and_copies_snapshot(
     assert [str(value) for value in captured["frame"]["trade_date"]] == [
         "2026-10-26"
     ]
-    assert conn.copied_snapshot == (202, 8)
-    copy_query = next(
-        query for query, _ in conn.queries if "INSERT INTO daily_price" in query
-    )
-    assert "SELECT" in copy_query and "WHERE price_snapshot_id = %s" in copy_query
+    assert conn.copied_snapshot is None
+    assert captured["snapshot"].parent_snapshot_id == 8
     assert report.price_snapshot_id == 202
     assert report.counts["rows_seen"] == 3
     assert report.counts["rows_skipped"] == 2
@@ -627,7 +629,7 @@ def test_full_actual_import_creates_baseline_without_requiring_existing_snapshot
     assert report.counts["rows_inserted"] == 1
     assert report.status == "complete"
     assert captured["snapshot"].input_manifest_ids == {"actual": 101}
-    assert "parent_price_snapshot_id" not in captured["snapshot"].source_manifest
+    assert captured["snapshot"].parent_snapshot_id is None
     assert not any("FROM price_snapshots" in query for query, _ in conn.queries)
     assert conn.copied_snapshot is None
 

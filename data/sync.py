@@ -285,11 +285,9 @@ def import_tdx_files(
         input_manifest_ids=manifest_ids,
         source_manifest=snapshot_source_manifest,
         status=status,
+        parent_snapshot_id=parent_snapshot_id,
     )
     snapshot_id = persist_price_snapshot(conn, snapshot)
-
-    if parent_snapshot_id is not None:
-        _copy_price_snapshot(conn, parent_snapshot_id, snapshot_id)
 
     rows_inserted = 0
     files_imported = 0
@@ -357,21 +355,6 @@ def import_tdx_directory(
     )
 
 
-def _copy_price_snapshot(conn, source_snapshot_id: int, target_snapshot_id: int) -> None:
-    columns = ", ".join(_INSERT_COLUMNS)
-    select_columns = ", ".join(
-        "%s" if column == "price_snapshot_id" else column
-        for column in _INSERT_COLUMNS
-    )
-    with conn.cursor() as cursor:
-        cursor.execute(
-            f"INSERT INTO daily_price ({columns}) "
-            f"SELECT {select_columns} FROM daily_price "
-            "WHERE price_snapshot_id = %s",
-            (target_snapshot_id, source_snapshot_id),
-        )
-
-
 def _latest_actual_snapshot(conn) -> tuple[int, dict[str, date]]:
     with conn.cursor() as cursor:
         cursor.execute("SELECT current_database()")
@@ -391,8 +374,8 @@ def _latest_actual_snapshot(conn) -> tuple[int, dict[str, date]]:
             raise ValueError("stocktool 中没有 actual 历史快照；请先执行历史全量导入")
         snapshot_id = int(snapshot_row[0])
         cursor.execute(
-            """SELECT code, MAX(trade_date) FROM daily_price
-               WHERE price_snapshot_id = %s GROUP BY code""",
+            """SELECT code, MAX(trade_date)
+               FROM daily_price_for_snapshot(%s) GROUP BY code""",
             (snapshot_id,),
         )
         latest_dates = {

@@ -1,14 +1,17 @@
 """D08：显式启用的本地 PostgreSQL 集成测试，测试写入全部回滚。"""
 
 import os
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 from dotenv import dotenv_values
 import psycopg
 from psycopg.conninfo import conninfo_to_dict
+import pandas as pd
 
-from data import sync
+from data import ak_sync, sync
 from tests.test_sync import write_tdx_file
 
 
@@ -91,12 +94,12 @@ def test_actual_history_idempotency_incremental_and_snapshot_isolation(db_conn, 
         ):
             cursor.execute(
                 "SELECT COUNT(*), COUNT(qfq_close), COUNT(hfq_close) "
-                "FROM daily_price WHERE price_snapshot_id = %s", (snapshot_id,)
+                "FROM daily_price_for_snapshot(%s)", (snapshot_id,)
             )
             assert cursor.fetchone() == (row_count, 0, 0)
             cursor.execute(
-                "SELECT actual_close FROM daily_price "
-                "WHERE price_snapshot_id = %s AND trade_date = '2026-10-23'",
+                "SELECT actual_close FROM daily_price_for_snapshot(%s) "
+                "WHERE trade_date = '2026-10-23'",
                 (snapshot_id,),
             )
             assert float(cursor.fetchone()[0]) == 11.5
@@ -107,6 +110,119 @@ def test_actual_history_idempotency_incremental_and_snapshot_isolation(db_conn, 
     assert noop.price_snapshot_id == delta.price_snapshot_id
     assert noop.counts["rows_inserted"] == 0
     assert version_counts(db_conn) == before_noop
+
+
+def test_akshare_incremental_stores_delta_and_resolves_parent_snapshot(
+    db_conn, tmp_path
+):
+    with db_conn.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO data_manifests "
+            "(source,source_version,price_basis,start_date,end_date,code_count,row_count,status) "
+            "VALUES ('tdx','ak-test-parent','actual','2026-10-23','2026-10-23',1,1,'complete') "
+            "RETURNING id"
+        )
+        manifest_id = cursor.fetchone()[0]
+        cursor.execute(
+            "INSERT INTO price_snapshots "
+            "(input_actual_manifest_id,status) VALUES (%s,'complete') RETURNING id",
+            (manifest_id,),
+        )
+        parent_id = cursor.fetchone()[0]
+        cursor.execute(
+            "INSERT INTO daily_price "
+            "(code,trade_date,price_snapshot_id,actual_open,actual_high,actual_low,actual_close,"
+            "source_price_basis,volume,amount,source) "
+            "VALUES ('600001','2026-10-23',%s,10,11,9,10.5,'actual',10000,105000,'tdx')",
+            (parent_id,),
+        )
+        cursor.execute("SAVEPOINT akshare_incremental_test")
+    before = version_counts(db_conn)
+
+    class FakeAkshare:
+        def stock_zh_a_spot_em(self):
+            return pd.DataFrame({"代码": ["600001", "000001", "688001"]})
+
+        def stock_zh_a_hist(self, *, symbol, **_):
+            rows = [["2026-10-26", symbol, 10.0, 10.5, 10.8, 9.8, 200, 210000]]
+            if symbol == "600001":
+                rows.insert(
+                    0,
+                    ["2026-10-23", symbol, 10.0, 10.5, 10.8, 9.8, 200, 210000],
+                )
+            return pd.DataFrame(
+                rows,
+                columns=["日期", "股票代码", "开盘", "收盘", "最高", "最低", "成交量", "成交额"],
+            )
+
+    report = ak_sync.run(
+        db_conn,
+        client=FakeAkshare(),
+        now=datetime(2026, 10, 26, 18, 10, tzinfo=ZoneInfo("Asia/Shanghai")),
+        request_delay=0,
+        raw_root=tmp_path,
+    )
+    assert report.status == "complete"
+    assert report.counts["symbols_requested"] == 2
+    assert report.counts["rows_inserted"] == 2
+    assert db_conn.execute(
+        "SELECT parent_price_snapshot_id FROM price_snapshots WHERE id=%s",
+        (report.price_snapshot_id,),
+    ).fetchone()[0] == parent_id
+    assert db_conn.execute(
+        "SELECT COUNT(*) FROM daily_price WHERE price_snapshot_id=%s",
+        (report.price_snapshot_id,),
+    ).fetchone()[0] == 2
+    assert db_conn.execute(
+        "SELECT COUNT(*) FROM daily_price_for_snapshot(%s)",
+        (report.price_snapshot_id,),
+    ).fetchone()[0] == 3
+    assert db_conn.execute(
+        "SELECT volume FROM daily_price_for_snapshot(%s) "
+        "WHERE code='000001' AND trade_date='2026-10-26'",
+        (report.price_snapshot_id,),
+    ).fetchone()[0] == 20000
+
+    noop = ak_sync.run(
+        db_conn, client=FakeAkshare(),
+        now=datetime(2026, 10, 26, 18, 15, tzinfo=ZoneInfo("Asia/Shanghai")),
+        request_delay=0, raw_root=tmp_path,
+    )
+    assert noop.price_snapshot_id == report.price_snapshot_id
+    assert noop.counts["rows_inserted"] == 0
+
+    class PartlyOfflineAkshare(FakeAkshare):
+        def stock_zh_a_hist(self, *, symbol, **kwargs):
+            if symbol == "000001":
+                raise TimeoutError("offline fixture")
+            return super().stock_zh_a_hist(symbol=symbol, **kwargs).assign(
+                **{"日期": ["2026-10-26", "2026-10-27"]}
+            )
+
+    partial = ak_sync.run(
+        db_conn, client=PartlyOfflineAkshare(),
+        now=datetime(2026, 10, 27, 18, 10, tzinfo=ZoneInfo("Asia/Shanghai")),
+        retry_count=1, request_delay=0, raw_root=tmp_path,
+    )
+    assert partial.status == "partial"
+    assert partial.counts["rows_inserted"] == 1
+    assert partial.counts["symbols_failed"] == 1
+    assert db_conn.execute(
+        "SELECT parent_price_snapshot_id FROM price_snapshots WHERE id=%s",
+        (partial.price_snapshot_id,),
+    ).fetchone()[0] == report.price_snapshot_id
+    assert db_conn.execute(
+        "SELECT COUNT(*) FROM daily_price_for_snapshot(%s)",
+        (partial.price_snapshot_id,),
+    ).fetchone()[0] == 4
+    assert db_conn.execute(
+        "SELECT COUNT(*) FROM daily_price_for_snapshot(%s)",
+        (report.price_snapshot_id,),
+    ).fetchone()[0] == 3
+
+    with db_conn.cursor() as cursor:
+        cursor.execute("ROLLBACK TO SAVEPOINT akshare_incremental_test")
+    assert version_counts(db_conn) == before
 
 
 def test_changed_source_failure_rolls_back_manifest_snapshot_and_written_rows(

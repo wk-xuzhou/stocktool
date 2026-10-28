@@ -1,8 +1,8 @@
 # TASKLIST
 
 **项目**：stocktool
-**版本**：v1.2 / 2026-10-25
-**状态**：数据底座开发阶段；P00、P01、P03、D01-D05、D08 已完成；P02 仍待来源元数据和执行换算依据
+**版本**：v1.3 / 2026-10-28
+**状态**：数据底座开发阶段；P00、P01、P03、D01-D05、D08 已完成；D08A 实现和定时任务已完成，真实联网行情待验收；P02 仍待来源元数据和执行换算依据
 
 ## 1. 使用规则
 
@@ -51,6 +51,7 @@
 | D06 | 先写复权与价格口径转换测试 | P02；P04 的 qfq 配对夹具 | 覆盖 direct qfq 与 actual 的逐日配对、hfq 转换可选路径、基准声明、缺因子失败和涨跌停使用 actual | [ ] | pytest 用例 |
 | D07 | 实现价格转换和不可变 qfq 快照 | D05、D06 | direct qfq 来源/配对可信，或转换路径因子可信，才生成 complete 快照；保留源价、actual、qfq 和来源元数据 | [ ] | `data/tdx_parser.py`/同步接口 |
 | D08 | 导入历史行情和增量行情 | D02、D04、D05 | actual 可先独立幂等导入；qfq/hfq 作为有来源声明的可选价格列写入清单 | [x] | 2026-10-27：实际导入 `data/raw/export_no/` 至 `stocktool`：5,578 文件（5,575 有效、3 空），17,009,531 行/5,575 证券，日期 1990-12-19—2026-10-23；snapshot 17 / manifest 16，状态 partial 如实反映空文件。约 869 秒、峰值 RSS 156 MiB、数据库约 3.23 GB。完整目录增量复扫新增 0 行且未建版本；真实 `SZ#000001` 尾部新增 1 行，所有行情字段匹配源文件，父快照未变；临时验收版本全部回滚。详见 `docs/D08_ACTUAL_IMPORT_ACCEPTANCE.md`。D12/D13 覆盖及质量验收、P02 qfq 来源元数据仍独立跟踪，不阻止 D08 完成。 |
+| D08A | 自动获取盘后最新 actual 行情 | D08 | 定时入口、重试、单位校验、增量版本、失败与旧行情明确报告；真实接口与自动运行分别验收 | [~] | 2026-10-28：同步代码、增量继承、新鲜度检查与定时任务已实现；90 项普通测试、3 项本地 PostgreSQL 集成测试通过。launchd 已安装加载，按本机 Asia/Shanghai 时区工作日 17:30 执行，当前 runs=0。真实证券列表/单证券日线均遇到代理错误，尚未获取真实新行情；整体保留进行中，待首次成功同步及真实量单位核对。 |
 | D09 | 接入历史证券状态及每日扩展数据 | P03、D04 | 保存 T 日 ST、停牌、名称、总/流通市值、换手率；缺失不以前值静默补齐 | [ ] | `stock_status_daily`、`stock_extra` |
 | D10 | 接入板块日线与历史板块成分 | P03、D04 | 可按交易日查询板块成分及指数；记录来源和覆盖缺口 | [ ] | `sector_daily`、`sector_membership_daily` |
 | D11 | 接入市场状态所需数据 | P03、D04 | 可按日取得上证指数、MA20 输入和全市场涨停数；范围定义一致 | [ ] | `market_daily` |
@@ -141,6 +142,8 @@
 | 2026-10-27 | D08 | 增量更新阶段性完成 | `.venv/bin/python -m pytest tests/test_sync.py -q`：20 passed；全套测试 57 passed；只读确认 `current_database() = stocktool`、`current_user = stocktool`，Docker Compose 宿主端口映射为 15433 | 增量仅能基于已有 actual 快照运行；本次未写入数据库，历史全量导入和真实数据端到端增量验收仍待完成。 |
 | 2026-10-27 | P03/P04 | 历史状态来源审计与夹具补充 | `.venv/bin/python -m pytest tests/test_historical_fixtures.py tests/test_database_schema.py -q`：9 passed；`docs/HISTORICAL_STATE_SOURCE_CHECK.md` | 明确当前接口只能提供当前 ST/板块成分或缺少可审计覆盖；新增 `is_delisted` 历史字段和 synthetic 状态/成分夹具；真实来源到位前不得进入正式信号/回测。 |
 | 2026-10-27 | D08 | 显式历史基线与有界内存导入 | `.venv/bin/python -m pytest -q`：70 passed、2 skipped（默认跳过数据库集成）；本地 `STOCKTOOL_RUN_DB_TESTS=1 .venv/bin/python -m pytest tests/test_sync_db.py -q`：2 passed；随后真实 5,578 文件全量导入、独立连接复核、全目录增量无新增和真实证券末尾日增量验收均通过，详情见 `D08_ACTUAL_IMPORT_ACCEPTANCE.md` | 首遍预检、次遍逐文件导入并核验 SHA-256；源文件变动拒绝。真实基线 partial 原因是 3 个空源文件；增量新增 0/1 行两种路径均通过，所有临时验收数据回滚。D08 完成；D12/D13 与 P02 数据缺口继续独立跟踪。 |
+
+| 2026-10-28 | D08A | 新增 [~]，实现与调度完成，联网验收待完成 | `.venv/bin/python -m pytest -q -rs`：90 passed、3 skipped；显式启用 `tests/test_sync_db.py`：3 passed；compileall、shell/plist 语法、`git diff --check` 通过；`launchctl print` 确认工作日 17:30、runs=0 | 先补失败测试再修复缺失日期、证券列表重试、日期越界、新鲜度和 CLI 退出码；数据库已增加父快照字段/解析函数/索引，增量仅存新行。真实请求受代理连接错误影响；只读复核 snapshot 17 / manifest 16、000001 末日 2026-10-23，测试记录全回滚。D08 保持完成，D08A 的真实更新验收独立跟踪。 |
 
 ## 5. 文档依据
 

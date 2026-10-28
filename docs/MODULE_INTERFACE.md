@@ -40,6 +40,11 @@
     data.sync.import_price_frame(conn, frame, price_snapshot_id: int, source='tdx') -> int
     # 单文件/单口径写入已建立的快照；重复 (code, trade_date, price_snapshot_id) 不覆盖。
 
+    data.ak_sync.run(conn, *, client=None, now=None, request_delay=0.2, retry_count=3) -> SyncReport
+    # 北京时间 17:00 后读取 AkShare 沪深主板/创业板证券列表及不复权日线；逐证券请求。
+    # 失败/空响应/未确认最新交易日返回 partial，CLI 退出 1；整批异常回滚。
+    # 增量快照只存新增行情，完整历史通过 daily_price_for_snapshot(id) 解析父版本继承链。
+
 2026-10-25 口径补充：解析器须从文件头识别 actual、qfq、hfq；actual 文件输出 `actual_open/actual_high/actual_low/actual_close`，qfq 文件输出 qfq 计算列，hfq 文件输出 `hfq_open/hfq_high/hfq_low/hfq_close`，非该口径的价格列留空，`source_price_basis` 记录源口径。三种口径都必须保留文件来源、代码、交易日和校验和；本批成交量已为股、成交额为元，不无条件乘 100。没有可信换算依据时只保留源价；不得利用收盘价比值补造其他价格列。详见 `DATA_SOURCE_CHECK.md`。
 
 `direct_qfq` 必须记录 qfq 导出基准（若来源未声明则明确记为 unknown）、导出时间、来源、来源版本、原始文件校验和，并按代码/交易日与 actual 做配对校验。不得擅自补写具体基准规则。`full_qfq` 是可选转换路径，必须创建新 `price_snapshot_id`，不能覆盖已有快照；缺少可信复权因子或关键历史时点数据时，标记数据不完整并阻止 qfq 依赖的正式信号/回测。actual 解析、原始保存和 actual 查询不受该阻塞影响。
@@ -84,5 +89,6 @@
 - DataFrame 列名使用全小写 snake_case；策略参数使用 @dataclass。
 - 数据不完整、参数无效分别使用 DataMissingError、ParamInvalidError；API 层转换为 HTTP 4xx/5xx。
 - 正式回测只接受 price_snapshot.status=complete 且输入数据完整的版本；试算可以返回 partial，但不得混入正式验收统计。
+- daily_price 是增量存储；所有信号、回测和报表必须用 daily_price_for_snapshot(id) 解析完整继承链，不能假设子快照在基表包含全部历史。
 
 2026-10-27 D08 补充：批次导入首遍逐文件解析预检并构建清单，次遍逐文件解析写入；内存不随全部行情行数累积（仅文件元数据随文件数量增长）。解析前后及两遍之间均核验 SHA-256，源文件变化立即失败。调用方必须在同一事务中运行并在任何异常时回滚，禁止捕获异常后提交半套版本。无新增数据时不建版本，但空输入仍报告 `partial`/`invalid`，不伪报 `complete`。`full_actual` 每次显式运行创建独立快照；对同一快照重复写入不覆盖，完整批次跨快照去重不在当前范围。actual 导入状态 `complete` 仅表示本批文件齐备，不代表 qfq、历史状态或正式回测输入完整。

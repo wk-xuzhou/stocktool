@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS price_snapshots (
   input_actual_manifest_id BIGINT REFERENCES data_manifests(id),
   input_qfq_manifest_id BIGINT REFERENCES data_manifests(id),
   input_hfq_manifest_id BIGINT REFERENCES data_manifests(id),
+  parent_price_snapshot_id BIGINT REFERENCES price_snapshots(id),
   status VARCHAR(16) NOT NULL DEFAULT 'building',
   notes TEXT
 );
@@ -97,7 +98,8 @@ ALTER TABLE data_manifests
 ALTER TABLE price_snapshots
   ADD COLUMN IF NOT EXISTS input_actual_manifest_id BIGINT REFERENCES data_manifests(id),
   ADD COLUMN IF NOT EXISTS input_qfq_manifest_id BIGINT REFERENCES data_manifests(id),
-  ADD COLUMN IF NOT EXISTS input_hfq_manifest_id BIGINT REFERENCES data_manifests(id);
+  ADD COLUMN IF NOT EXISTS input_hfq_manifest_id BIGINT REFERENCES data_manifests(id),
+  ADD COLUMN IF NOT EXISTS parent_price_snapshot_id BIGINT REFERENCES price_snapshots(id);
 
 CREATE OR REPLACE FUNCTION reject_referenced_manifest_change()
 RETURNS trigger
@@ -227,6 +229,33 @@ END $$;
 
 CREATE TABLE IF NOT EXISTS daily_price_default
   PARTITION OF daily_price DEFAULT;
+
+CREATE INDEX IF NOT EXISTS daily_price_snapshot_lookup
+  ON daily_price (price_snapshot_id, code, trade_date);
+
+CREATE OR REPLACE FUNCTION daily_price_for_snapshot(requested_snapshot_id BIGINT)
+RETURNS SETOF daily_price
+LANGUAGE sql
+STABLE
+AS $$
+  WITH RECURSIVE snapshot_lineage AS (
+    SELECT id, parent_price_snapshot_id, 0 AS depth
+    FROM price_snapshots
+    WHERE id = requested_snapshot_id
+    UNION ALL
+    SELECT parent.id, parent.parent_price_snapshot_id, child.depth + 1
+    FROM price_snapshots AS parent
+    JOIN snapshot_lineage AS child
+      ON parent.id = child.parent_price_snapshot_id
+  ), resolved AS (
+    SELECT DISTINCT ON (price.code, price.trade_date) price.*
+    FROM snapshot_lineage AS lineage
+    JOIN daily_price AS price ON price.price_snapshot_id = lineage.id
+    ORDER BY price.code, price.trade_date, lineage.depth
+  )
+  SELECT * FROM resolved;
+$$;
+
 CREATE TABLE IF NOT EXISTS stock_status_daily_default
   PARTITION OF stock_status_daily DEFAULT;
 CREATE TABLE IF NOT EXISTS stock_extra_default

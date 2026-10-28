@@ -78,6 +78,15 @@ def test_partitioned_tables_define_year_partitions_and_default_partitions():
     assert "PARTITION OF stock_extra DEFAULT" in sql
 
 
+def test_daily_snapshots_store_only_deltas_and_expose_inherited_rows():
+    sql = schema_text()
+
+    assert "parent_price_snapshot_id BIGINT REFERENCES price_snapshots(id)" in sql
+    assert "CREATE OR REPLACE FUNCTION daily_price_for_snapshot" in sql
+    assert "WITH RECURSIVE snapshot_lineage" in sql
+    assert "CREATE INDEX IF NOT EXISTS daily_price_snapshot_lookup" in sql
+
+
 def test_init_db_is_idempotent_and_stops_on_sql_error():
     sql = schema_text()
 

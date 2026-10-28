@@ -93,6 +93,7 @@ class PriceSnapshot:
     input_manifest_ids: dict[str, int]
     source_manifest: dict[str, object]
     status: ManifestStatus
+    parent_snapshot_id: int | None = None
 
 
 def persist_data_manifest(conn, manifest: DataManifest) -> int:
@@ -129,8 +130,9 @@ def persist_price_snapshot(conn, snapshot: PriceSnapshot) -> int:
         cursor.execute(
             """INSERT INTO price_snapshots
                (source_manifest, input_actual_manifest_id,
-                input_qfq_manifest_id, input_hfq_manifest_id, status)
-               VALUES (%s::jsonb, %s, %s, %s, %s)
+                input_qfq_manifest_id, input_hfq_manifest_id, status,
+                parent_price_snapshot_id)
+               VALUES (%s::jsonb, %s, %s, %s, %s, %s)
                RETURNING id""",
             (
                 json.dumps(snapshot.source_manifest, ensure_ascii=False),
@@ -138,6 +140,7 @@ def persist_price_snapshot(conn, snapshot: PriceSnapshot) -> int:
                 input_ids.get("qfq"),
                 input_ids.get("hfq"),
                 snapshot.status,
+                snapshot.parent_snapshot_id,
             ),
         )
         row = cursor.fetchone()
@@ -295,6 +298,7 @@ class VersionRegistry:
         input_manifest_ids: Mapping[str, int],
         *,
         status: ManifestStatus = "building",
+        parent_snapshot_id: int | None = None,
     ) -> PriceSnapshot:
         snapshot_status = _validate_status(status)
         if not input_manifest_ids:
@@ -303,6 +307,8 @@ class VersionRegistry:
         normalized_ids = {str(basis): int(manifest_id) for basis, manifest_id in input_manifest_ids.items()}
         if not set(normalized_ids).issubset(_PRICE_BASES):
             raise ValueError("价格快照输入口径必须是 actual/qfq/hfq")
+        if parent_snapshot_id is not None and parent_snapshot_id not in self._snapshots:
+            raise ValueError(f"父价格快照不存在：{parent_snapshot_id}")
 
         inputs: dict[str, object] = {}
         for basis, manifest_id in normalized_ids.items():
@@ -333,6 +339,7 @@ class VersionRegistry:
             input_manifest_ids=normalized_ids,
             source_manifest={"inputs": inputs},
             status=snapshot_status,
+            parent_snapshot_id=parent_snapshot_id,
         )
         self._snapshots[snapshot_id] = snapshot
         return snapshot

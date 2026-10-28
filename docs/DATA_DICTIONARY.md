@@ -8,6 +8,7 @@
 - 成交量统一为股；2026-10-25 抽查的通达信 TXT 已为股，不乘 100，其他来源仅在明确为手时乘 100。成交额为元；价格使用 `NUMERIC(12,3)`，市值/成交额使用元。
 - 日期使用 `DATE`，采集和更新时间使用 `TIMESTAMPTZ`；代码统一为 6 位字符串。
 - `daily_price` 同时容纳独立导入的 `actual`、可追溯的 `qfq` 和可选 `hfq` 源价格；qfq 不是由文件名或价格比值推断。复权因子仅在来源可验证时保存，原始价格和价格快照 ID 必须保留，以便审计和复现。
+- 增量 `price_snapshots` 通过 `parent_price_snapshot_id` 继承父快照，`daily_price` 仅存该版本新增/覆盖的交易日；函数返回行中的 `price_snapshot_id` 保留该行实际写入版本；读取完整快照必须使用 `daily_price_for_snapshot(price_snapshot_id)`，不能只按 `daily_price.price_snapshot_id` 查询。
 - 任何回测和信号均绑定不可变的 `price_snapshot_id`。全量复权生成新快照，不覆盖已有快照；旧快照只有在无信号或回测引用且显式清理时才可删除。
 - 历史回测必须使用历史时点的 ST 状态、证券状态、行业/概念板块成分、市值和停牌信息。若某日期所需快照缺失，该日期标记数据不完整并从正式指标中排除，不能以前值或当前值静默填充。
 
@@ -58,6 +59,7 @@
 | input_actual_manifest_id | BIGINT FK | actual 输入清单；无该口径输入时为空 |
 | input_qfq_manifest_id | BIGINT FK | qfq 输入清单；无该口径输入时为空 |
 | input_hfq_manifest_id | BIGINT FK | hfq 输入清单；无该口径输入时为空 |
+| parent_price_snapshot_id | BIGINT FK | 增量快照的父版本；全量基线为空；完整历史须解析继承链 |
 | status | VARCHAR(16) | building/complete/partial/invalid |
 | notes | TEXT | 生成说明、逐列/逐日配对校验结果和限制 |
 
