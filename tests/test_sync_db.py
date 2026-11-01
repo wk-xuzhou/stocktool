@@ -140,8 +140,11 @@ def test_akshare_incremental_stores_delta_and_resolves_parent_snapshot(
     before = version_counts(db_conn)
 
     class FakeAkshare:
-        def stock_zh_a_spot_em(self):
-            return pd.DataFrame({"代码": ["600001", "000001", "688001"]})
+        def stock_info_sh_name_code(self, *, symbol):
+            return pd.DataFrame({"证券代码": ["600001", "688001"]})
+
+        def stock_info_sz_name_code(self, *, symbol):
+            return pd.DataFrame({"A股代码": ["000001"]})
 
         def stock_zh_a_hist(self, *, symbol, **_):
             rows = [["2026-10-26", symbol, 10.0, 10.5, 10.8, 9.8, 200, 210000]]

@@ -66,7 +66,7 @@ def require_market_closed(now: datetime) -> date:
 
 
 def eligible_symbols(spot_frame: pd.DataFrame) -> tuple[str, ...]:
-    """从实时证券列表中选取项目范围内的沪深主板和创业板代码。"""
+    """从证券代码列中选取项目范围内的沪深主板和创业板代码。"""
 
     if "代码" not in spot_frame.columns:
         raise ValueError("AkShare 实时证券列表缺少代码列")
@@ -83,6 +83,31 @@ def eligible_symbols(spot_frame: pd.DataFrame) -> tuple[str, ...]:
     if not symbols:
         raise ValueError("AkShare 实时证券列表中没有项目范围内的 A 股代码")
     return tuple(symbols)
+
+
+def eligible_exchange_symbols(
+    sh_frame: pd.DataFrame, sz_frame: pd.DataFrame
+) -> tuple[str, ...]:
+    """合并交易所名单，拒绝缺列、坏代码和空的支持范围名单。"""
+
+    frames = (
+        (sh_frame, "证券代码", "上交所主板名单", ("60",)),
+        (sz_frame, "A股代码", "深交所A股名单", ("00", "30")),
+    )
+    symbols: set[str] = set()
+    for frame, column, source, prefixes in frames:
+        if column not in frame.columns:
+            raise ValueError(f"{source}缺少{column}列")
+        values = frame[column].astype("string").str.strip()
+        if values.isna().any() or not values.str.fullmatch(r"\d{1,6}").all():
+            raise ValueError(f"{source}含无效证券代码")
+        symbols.update(
+            code for code in values.str.zfill(6) if code.startswith(prefixes)
+        )
+    ordered_symbols = tuple(sorted(symbols))
+    if not ordered_symbols:
+        raise ValueError("交易所名单中没有项目范围内的 A 股代码")
+    return ordered_symbols
 
 
 def normalize_hist_frame(
@@ -226,11 +251,21 @@ def fetch_daily_histories(
         raise ValueError("重试次数、请求间隔和新证券回看天数参数无效")
     for attempt in range(retry_count):
         try:
-            symbols = eligible_symbols(client.stock_zh_a_spot_em())
+            source = "上交所主板名单"
+            sh_frame = client.stock_info_sh_name_code(symbol="主板A股")
+            source = "深交所 A 股名单"
+            sz_frame = client.stock_info_sz_name_code(symbol="A股列表")
+            if not isinstance(sh_frame, pd.DataFrame) or not isinstance(
+                sz_frame, pd.DataFrame
+            ):
+                raise ValueError("交易所证券名单返回值不是 DataFrame")
+            symbols = eligible_exchange_symbols(sh_frame, sz_frame)
             break
-        except Exception:
+        except Exception as exc:
             if attempt + 1 == retry_count:
-                raise
+                raise RuntimeError(
+                    f"获取{source}失败：{type(exc).__name__}: {exc}；未使用备用名单"
+                ) from exc
             sleep(float(2**attempt))
     normalized_frames: list[pd.DataFrame] = []
     raw_frames: list[pd.DataFrame] = []

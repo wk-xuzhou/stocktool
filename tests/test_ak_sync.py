@@ -75,14 +75,107 @@ def test_eligible_symbols_only_includes_project_supported_a_share_prefixes():
     assert eligible_symbols(spot) == ("000001", "300001", "600001")
 
 
+def test_fetch_merges_exchange_main_board_and_sz_a_share_lists():
+    class ListedClient:
+        def stock_info_sh_name_code(self, *, symbol):
+            assert symbol == "主板A股"
+            return pd.DataFrame({"证券代码": ["600001", "601001", "688001", "000002"]})
+
+        def stock_info_sz_name_code(self, *, symbol):
+            assert symbol == "A股列表"
+            return pd.DataFrame({"A股代码": ["000001", "002001", "300001", "920001", "600002"]})
+
+        def stock_zh_a_hist(self, **kwargs):
+            return history_frame(kwargs["symbol"])
+
+    fetched = fetch_daily_histories(
+        ListedClient(), latest_dates={}, today=date(2026, 10, 26),
+        retry_count=1, request_delay=0,
+    )
+
+    assert fetched.symbols == ("000001", "002001", "300001", "600001", "601001")
+
+
+def test_symbol_list_source_failure_is_explicit_and_never_falls_back():
+    class BrokenSZClient:
+        def stock_info_sh_name_code(self, *, symbol):
+            return pd.DataFrame({"证券代码": ["600001"]})
+
+        def stock_info_sz_name_code(self, *, symbol):
+            raise ConnectionError("SZ source offline")
+
+        def stock_zh_a_spot_em(self):
+            pytest.fail("禁止回退到东财实时列表")
+
+    with pytest.raises(RuntimeError, match="未使用备用名单") as error:
+        fetch_daily_histories(
+            BrokenSZClient(), latest_dates={}, today=date(2026, 10, 26),
+            retry_count=1, request_delay=0,
+        )
+    assert isinstance(error.value.__cause__, ConnectionError)
+    assert "SZ source offline" in str(error.value.__cause__)
+    assert "深交所 A 股名单" in str(error.value)
+
+
+def test_daily_history_transient_failure_retries_then_succeeds():
+    class FlakyHistoryClient:
+        attempts = 0
+
+        def stock_info_sh_name_code(self, *, symbol):
+            return pd.DataFrame({"证券代码": ["600001"]})
+
+        def stock_info_sz_name_code(self, *, symbol):
+            return pd.DataFrame({"A股代码": []})
+
+        def stock_zh_a_hist(self, **kwargs):
+            self.attempts += 1
+            if self.attempts == 1:
+                raise ConnectionError("transient reset")
+            return history_frame(kwargs["symbol"])
+
+    client = FlakyHistoryClient()
+    waits = []
+    fetched = fetch_daily_histories(
+        client, latest_dates={}, today=date(2026, 10, 26),
+        retry_count=2, request_delay=0, sleep=waits.append,
+    )
+    assert client.attempts == 2
+    assert fetched.failed_symbols == ()
+    assert len(fetched.normalized) == 1
+    assert waits == [1.0]
+
+
+def test_daily_history_exhausted_retries_are_reported_partial():
+    class BrokenHistoryClient:
+        def stock_info_sh_name_code(self, *, symbol):
+            return pd.DataFrame({"证券代码": ["600001"]})
+
+        def stock_info_sz_name_code(self, *, symbol):
+            return pd.DataFrame({"A股代码": []})
+
+        def stock_zh_a_hist(self, **kwargs):
+            raise ConnectionError("connection reset")
+
+    fetched = fetch_daily_histories(
+        BrokenHistoryClient(), latest_dates={}, today=date(2026, 10, 26),
+        retry_count=2, request_delay=0, max_consecutive_failures=2,
+        sleep=lambda _: None,
+    )
+    assert fetched.failed_symbols == ("600001",)
+    assert any("ConnectionError: connection reset" in issue for issue in fetched.issues)
+
+
 def test_fetch_uses_actual_daily_history_and_retries_then_collects_failure():
     class FakeAkshare:
         def __init__(self):
             self.calls = []
             self.failures = 0
 
-        def stock_zh_a_spot_em(self):
-            return pd.DataFrame({"代码": ["600001", "000001"]})
+        def stock_info_sh_name_code(self, *, symbol):
+            return pd.DataFrame({"证券代码": ["600001"]})
+
+        def stock_info_sz_name_code(self, *, symbol):
+            return pd.DataFrame({"A股代码": ["000001"]})
 
         def stock_zh_a_hist(self, **kwargs):
             self.calls.append(kwargs)
@@ -122,8 +215,11 @@ def test_new_symbol_fetch_uses_bounded_recent_window():
         def __init__(self):
             self.request = None
 
-        def stock_zh_a_spot_em(self):
-            return pd.DataFrame({"代码": ["300001"]})
+        def stock_info_sh_name_code(self, *, symbol):
+            return pd.DataFrame({"证券代码": []})
+
+        def stock_info_sz_name_code(self, *, symbol):
+            return pd.DataFrame({"A股代码": ["300001"]})
 
         def stock_zh_a_hist(self, **kwargs):
             self.request = kwargs
@@ -145,8 +241,11 @@ def test_new_symbol_fetch_uses_bounded_recent_window():
 
 def test_fetch_stops_after_consecutive_provider_failures():
     class OfflineAkshare:
-        def stock_zh_a_spot_em(self):
-            return pd.DataFrame({"代码": ["600001", "600002", "600003"]})
+        def stock_info_sh_name_code(self, *, symbol):
+            return pd.DataFrame({"证券代码": ["600001", "600002", "600003"]})
+
+        def stock_info_sz_name_code(self, *, symbol):
+            return pd.DataFrame({"A股代码": []})
 
         def stock_zh_a_hist(self, **_):
             raise TimeoutError("provider unavailable")
@@ -193,11 +292,14 @@ def test_symbol_list_retries_transient_failure():
     class FlakyClient:
         attempts = 0
 
-        def stock_zh_a_spot_em(self):
+        def stock_info_sh_name_code(self, *, symbol):
             self.attempts += 1
             if self.attempts == 1:
                 raise TimeoutError("offline fixture")
-            return pd.DataFrame({"代码": ["600001"]})
+            return pd.DataFrame({"证券代码": ["600001"]})
+
+        def stock_info_sz_name_code(self, *, symbol):
+            return pd.DataFrame({"A股代码": []})
 
         def stock_zh_a_hist(self, **kwargs):
             return history_frame(kwargs["symbol"])
@@ -215,8 +317,11 @@ def test_symbol_list_retries_transient_failure():
 
 def test_old_response_is_explicitly_marked_stale_not_latest():
     class OldClient:
-        def stock_zh_a_spot_em(self):
-            return pd.DataFrame({"代码": ["600001"]})
+        def stock_info_sh_name_code(self, *, symbol):
+            return pd.DataFrame({"证券代码": ["600001"]})
+
+        def stock_info_sz_name_code(self, *, symbol):
+            return pd.DataFrame({"A股代码": []})
 
         def stock_zh_a_hist(self, **kwargs):
             return history_frame(kwargs["symbol"])
@@ -232,8 +337,11 @@ def test_old_response_is_explicitly_marked_stale_not_latest():
 
 def test_response_outside_requested_dates_is_rejected():
     class FutureClient:
-        def stock_zh_a_spot_em(self):
-            return pd.DataFrame({"代码": ["600001"]})
+        def stock_info_sh_name_code(self, *, symbol):
+            return pd.DataFrame({"证券代码": ["600001"]})
+
+        def stock_info_sz_name_code(self, *, symbol):
+            return pd.DataFrame({"A股代码": []})
 
         def stock_zh_a_hist(self, **kwargs):
             return history_frame(kwargs["symbol"]).assign(**{"日期": ["2026-10-28"]})
