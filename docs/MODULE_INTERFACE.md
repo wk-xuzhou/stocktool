@@ -41,7 +41,8 @@
     # 单文件/单口径写入已建立的快照；重复 (code, trade_date, price_snapshot_id) 不覆盖。
 
     data.ak_sync.run(conn, *, client=None, now=None, request_delay=0.2, retry_count=3) -> SyncReport
-    # 北京时间 17:00 后读取 AkShare 沪深主板/创业板证券列表及不复权日线；逐证券请求。
+    # 北京时间 09:30 前读取上一自然日，17:00 后读取当日的 AkShare 沪深主板/创业板证券列表及不复权日线；逐证券请求。
+    # 09:30 至 17:00 拒绝运行，避免读取未完成的当日 K 线。
     # 失败/空响应/未确认最新交易日返回 partial，CLI 退出 1；整批异常回滚。
     # 增量快照只存新增行情，完整历史通过 daily_price_for_snapshot(id) 解析父版本继承链。
 

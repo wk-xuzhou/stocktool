@@ -1,4 +1,4 @@
-"""盘后从 AkShare 获取 A 股 actual 日线并增量写入版本快照。"""
+"""从 AkShare 获取 A 股 actual 日线并增量写入版本快照。"""
 
 from __future__ import annotations
 
@@ -55,13 +55,15 @@ class FetchedHistories:
 
 
 def require_market_closed(now: datetime) -> date:
-    """只允许北京时间 17:00 后运行，避开未完成的当日 K 线。"""
+    """返回本次同步目标日，避开交易时段的未完成 K 线。"""
 
     if now.tzinfo is None:
         raise ValueError("运行时间必须包含时区")
     shanghai_now = now.astimezone(_SHANGHAI)
+    if shanghai_now.time() < time(9, 30):
+        return shanghai_now.date() - timedelta(days=1)
     if shanghai_now.time() < time(17, 0):
-        raise ValueError("自动行情同步仅允许北京时间 17:00 收盘后运行")
+        raise ValueError("自动行情同步仅允许北京时间开盘前或收盘后运行")
     return shanghai_now.date()
 
 
@@ -469,10 +471,10 @@ def run(
     raw_root: str | Path = "data/raw/akshare_daily",
     progress: Callable[[str], None] | None = None,
 ) -> SyncReport:
-    """在北京时间收盘后同步当前沪深主板和创业板 actual 日线。"""
+    """在开盘前或收盘后同步沪深主板和创业板 actual 日线。"""
 
     fetched_at = now or datetime.now(_SHANGHAI)
-    today = require_market_closed(fetched_at)
+    target_date = require_market_closed(fetched_at)
     parent_snapshot_id, latest_dates = sync._latest_actual_snapshot(conn)
     if client is None:
         import akshare as client
@@ -480,7 +482,7 @@ def run(
     fetched = fetch_daily_histories(
         client,
         latest_dates=latest_dates,
-        today=today,
+        today=target_date,
         new_symbol_lookback_days=new_symbol_lookback_days,
         retry_count=retry_count,
         max_consecutive_failures=max_consecutive_failures,
@@ -491,7 +493,9 @@ def run(
         provider_version = importlib.metadata.version("akshare")
     except importlib.metadata.PackageNotFoundError:
         provider_version = "unknown"
-    source_version = f"akshare-{provider_version}-{today:%Y%m%d}-{fetched_at:%H%M%S}"
+    source_version = (
+        f"akshare-{provider_version}-{target_date:%Y%m%d}-{fetched_at:%H%M%S}"
+    )
     return _persist_incremental(
         conn,
         fetched=fetched,

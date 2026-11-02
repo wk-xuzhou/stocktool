@@ -262,22 +262,33 @@ def test_fetch_stops_after_consecutive_provider_failures():
         )
 
 
-def test_market_sync_is_blocked_until_after_close_in_shanghai_time():
-    before_close = datetime(2026, 10, 27, 16, 59, tzinfo=ZoneInfo("Asia/Shanghai"))
+def test_market_sync_targets_previous_day_before_open_and_today_after_close():
+    before_open = datetime(2026, 10, 27, 9, 29, tzinfo=ZoneInfo("Asia/Shanghai"))
     after_close = datetime(2026, 10, 27, 17, 1, tzinfo=ZoneInfo("Asia/Shanghai"))
 
-    with pytest.raises(ValueError, match="收盘后"):
-        require_market_closed(before_close)
+    assert require_market_closed(before_open) == date(2026, 10, 26)
     assert require_market_closed(after_close) == date(2026, 10, 27)
 
 
-def test_launchd_template_runs_weekdays_after_market_close():
+@pytest.mark.parametrize(
+    "when",
+    [
+        datetime(2026, 10, 27, 9, 30, tzinfo=ZoneInfo("Asia/Shanghai")),
+        datetime(2026, 10, 27, 16, 59, tzinfo=ZoneInfo("Asia/Shanghai")),
+    ],
+)
+def test_market_sync_is_blocked_during_trading_day(when):
+    with pytest.raises(ValueError, match="开盘前或收盘后"):
+        require_market_closed(when)
+
+
+def test_launchd_template_runs_weekdays_before_market_open():
     path = Path(__file__).resolve().parents[1] / "scripts/launchd/com.stocktool.akshare-daily.plist"
     config = plistlib.loads(path.read_bytes())
 
     schedules = config["StartCalendarInterval"]
     assert [item["Weekday"] for item in schedules] == [1, 2, 3, 4, 5]
-    assert all(item["Hour"] == 17 and item["Minute"] == 30 for item in schedules)
+    assert all(item["Hour"] == 7 and item["Minute"] == 0 for item in schedules)
 
 
 
